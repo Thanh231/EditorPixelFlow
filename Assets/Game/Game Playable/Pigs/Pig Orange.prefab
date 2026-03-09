@@ -107,6 +107,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PigComponent
   bulletCount: 0
   text: {fileID: 7405535490307403795}
+  color: 
 --- !u!1 &2702404385539421944
 GameObject:
   m_ObjectHideFlags: 0
@@ -142,7 +143,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 50, y: 50}
+  m_SizeDelta: {x: 100, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &1153826059750489470
 CanvasRenderer:

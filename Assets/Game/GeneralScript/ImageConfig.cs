@@ -2,13 +2,20 @@ using UnityEngine;
 using System.Collections.Generic;
 
 [System.Serializable]
+public class PigLayoutData
+{
+    public string colorName;
+    public int bullets;
+}
+
+[System.Serializable]
 public class ColorCountData
 {
     public string colorName;
     public int count;
 }
 
-[CreateAssetMenu(fileName = "ImageConfig", menuName = "Create Image Config")]
+[CreateAssetMenu(fileName = "NewImageConfig", menuName = "Configs/Create Image Config")]
 public class ImageConfig : ScriptableObject
 {
     [Header("Level Info")]
@@ -20,6 +27,13 @@ public class ImageConfig : ScriptableObject
     public int height;
     public float spacing;
 
+    public int targetDifficulty;
+
     [Header("Generated Data")]
     public List<ColorCountData> colorCounts = new List<ColorCountData>();
+
+    [Header("Pre-Calculated Layout")]
+    public List<PigLayoutData> pigLayout = new List<PigLayoutData>();
+
+    public int actualSteps; 
 }

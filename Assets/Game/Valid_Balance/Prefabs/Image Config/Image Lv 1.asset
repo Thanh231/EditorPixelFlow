@@ -12,13 +12,65 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2475a38c4d3e3834db726832bc5a744a, type: 3}
   m_Name: Image Lv 1
   m_EditorClassIdentifier: Assembly-CSharp::ImageConfig
-  levelIndex: 2
-  textureInput: {fileID: 2800000, guid: 858dc23c072bfbe48a13e028bf45ff12, type: 3}
-  width: 20
-  height: 20
-  spacing: 0.5
+  levelIndex: 1
+  textureInput: {fileID: 2800000, guid: ab4c2040ba58f1e4bafb17f9871a77ac, type: 3}
+  width: 25
+  height: 28
+  spacing: 0.55
+  targetDifficulty: 23
   colorCounts:
+  - colorName: black
+    count: 186
+  - colorName: white
+    count: 148
+  - colorName: pink
+    count: 21
+  - colorName: orange
+    count: 19
   - colorName: dark pink
-    count: 230
+    count: 10
+  - colorName: blue
+    count: 5
+  - colorName: red
+    count: 2
   - colorName: yellow
-    count: 170
+    count: 1
+  pigLayout:
+  - colorName: pink
+    bullets: 21
+  - colorName: blue
+    bullets: 5
+  - colorName: yellow
+    bullets: 1
+  - colorName: red
+    bullets: 2
+  - colorName: white
+    bullets: 20
+  - colorName: black
+    bullets: 20
+  - colorName: white
+    bullets: 20
+  - colorName: white
+    bullets: 30
+  - colorName: black
+    bullets: 20
+  - colorName: dark pink
+    bullets: 10
+  - colorName: black
+    bullets: 40
+  - colorName: white
+    bullets: 38
+  - colorName: white
+    bullets: 20
+  - colorName: black
+    bullets: 30
+  - colorName: white
+    bullets: 20
+  - colorName: black
+    bullets: 36
+  - colorName: orange
+    bullets: 19
+  - colorName: black
+    bullets: 20
+  - colorName: black
+    bullets: 20
