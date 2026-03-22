@@ -580,12 +580,12 @@ public class ImageToConfigToolEditor : EditorWindow
             }
         }
         
-        data.lanes = new List<LaneData>();
+        data.lanes = new List<LaneConfig>();
         if (_multiColumnPigs != null)
         {
             for (int i = 0; i < _multiColumnPigs.Length; i++)
             {
-                LaneData newLane = new LaneData();
+                LaneConfig newLane = new LaneConfig();
                 newLane.pigs = new List<PigLayoutData>(_multiColumnPigs[i]);
                 data.lanes.Add(newLane);
             }

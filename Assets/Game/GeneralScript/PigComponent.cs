@@ -3,9 +3,13 @@ using UnityEngine;
 
 public class PigComponent : MonoBehaviour
 {
+
     public int bulletCount;
     public TextMeshProUGUI text;
     public string color;
+    public bool isHidden;
+    public PigMarker pigLeft = null;
+    public PigMarker pigRight = null;
     public void SetBulletCount(int count,string color)
     {
         bulletCount = count;
@@ -13,9 +17,10 @@ public class PigComponent : MonoBehaviour
         this.color = color;
     }
 
-    // Update is called once per frame
-    void Update()
+    public void ReduceBulletCount()
     {
-        
+        bulletCount--;
+        text.text = bulletCount.ToString();
     }
+
 }
