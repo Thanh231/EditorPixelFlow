@@ -14,7 +14,19 @@ public class ColorBtn : MonoBehaviour, IPointerDownHandler
     {
         color = colorName;
         levelEditor = editor;
-        sprite.color = Helper.GetColorFromName(colorName); // Hiển thị màu trên nút
+        if (sprite != null)
+        {
+            if (colorName == "empty")
+            {
+                sprite.sprite = editor.emptySprite;
+                sprite.color = Color.white;
+            }
+            else
+            {
+                sprite.sprite = null;
+                sprite.color = Helper.GetColorFromName(colorName); // Hiển thị màu trên nút
+            }
+        }
     }
     public void OnPointerDown(PointerEventData eventData)
     {

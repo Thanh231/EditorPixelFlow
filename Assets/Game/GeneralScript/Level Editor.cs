@@ -8,6 +8,7 @@ using UnityEngine.Networking;
 using UnityEngine.UI;
 using TMPro;
 using System.Diagnostics;
+using UnityEngine.EventSystems;
 
 
 public class LevelEditor : MonoBehaviour
@@ -19,20 +20,10 @@ public class LevelEditor : MonoBehaviour
         public bool isUsed;
     }
 
-    public string[] test1 = {
+    public string[] features = {
         "Paint",
-        "Re-Color",
-        "HardPixel",
-        "EndHardPixel"
+        "Re-Color"
     };
-
-    // public string[] featurePigName = {
-    //     "Swap",
-    //     "Hidden",
-    //     "Linked",
-    //     "EndLink",
-    //     "HardPixel"
-    // };
 
     public string[] test12 = {
         "Swap",
@@ -87,14 +78,13 @@ public class LevelEditor : MonoBehaviour
     private struct UndoSnapshot
     {
         public string[,] tempGrid;
-        public List<GridCell.CellData> hardPixelEntries;
         public List<PigLayoutData>[] multiColumnPigs;
         public int queueColumns;
     }
     private List<UndoSnapshot> _undoSnapshots = new List<UndoSnapshot>();
 
     // --- Feature state ---
-    public enum FeatureMode { None, Paint, RecolorPicking, RecolorWaitBrush, HardPixelColorPick, HardPixelCellPick, HardPixelActive }
+    public enum FeatureMode { None, Paint, RecolorPicking, RecolorWaitBrush }
     private FeatureMode _currentMode = FeatureMode.Paint;
     private string _recolorSourceColor = null;
     private List<FeatureBtn> _featureBtns = new List<FeatureBtn>();
@@ -102,11 +92,6 @@ public class LevelEditor : MonoBehaviour
     private string _activePigFeature = "Swap";
     private int _nextLinkId = 0;
     private List<(int col, int row)> _linkingPigs = new List<(int col, int row)>();
-
-    // HardPixel state
-    private string _hardPixelColor = null;
-    private List<(int x, int y)> _hardPixelSelectedCells = new List<(int x, int y)>();
-    private List<GridCell.CellData> _hardPixelEntries = new List<GridCell.CellData>();
 
     private void Start()
     {
@@ -189,6 +174,7 @@ public class LevelEditor : MonoBehaviour
         const float baseSize = 60f;   // kích thước ô vuông (gấp đôi 30f)
         const float spacing  = 8f;    // khoảng cách đều nhau giữa các ô
         var colorKeys = new List<string>(Helper.ColorMap.Keys);
+        if (!colorKeys.Contains("empty")) colorKeys.Insert(0, "empty");
         int count = colorKeys.Count;
 
         float containerW = containerRect.rect.width;
@@ -219,7 +205,19 @@ public class LevelEditor : MonoBehaviour
             GameObject go = Instantiate(colorPrefab, colorContainer);
 
             Image img = go.GetComponent<Image>();
-            if (img != null) img.color = Helper.GetColorFromName(colorName);
+            if (img != null)
+            {
+                if (colorName == "empty")
+                {
+                    img.sprite = emptySprite;
+                    img.color = Color.white;
+                }
+                else
+                {
+                    img.sprite = null;
+                    img.color = Helper.GetColorFromName(colorName);
+                }
+            }
 
             Button btn = go.GetComponent<Button>();
             if (btn != null)
@@ -246,7 +244,7 @@ public class LevelEditor : MonoBehaviour
         if (containerRect == null) return;
 
         const float spacing = 2f;
-        int count = test1.Length;
+        int count = features.Length;
         float containerW = containerRect.rect.width;
         float containerH = containerRect.rect.height;
 
@@ -276,7 +274,7 @@ public class LevelEditor : MonoBehaviour
             GameObject go = Instantiate(featurePrefab, featureContainer);
 
             FeatureBtn featureBtn = go.GetComponent<FeatureBtn>();
-            featureBtn.SetFeatureName(test1[i], this);
+            featureBtn.SetFeatureName(features[i], this);
             _featureBtns.Add(featureBtn);
 
         }
@@ -285,10 +283,10 @@ public class LevelEditor : MonoBehaviour
 
     public void OnClickFeatureButton(int index)
     {
-        if (index < 0 || index >= test1.Length) return;
+        if (index < 0 || index >= features.Length) return;
         NotifyFeatureSelected(index);
 
-        switch (test1[index])
+        switch (features[index])
         {
             case "Paint":
                 Paint();
@@ -296,23 +294,9 @@ public class LevelEditor : MonoBehaviour
             case "Re-Color":
                 ReColorSpecificColor();
                 break;
-            case "HardPixel":
-                ProcessHardPixelFeature();
-                break;
-            case "EndHardPixel":
-                CommitHardPixelGroup();
-                break;
             default:
                 break;
         }
-    }
-
-    public void ProcessHardPixelFeature()
-    {
-        _hardPixelColor = null;
-        _hardPixelSelectedCells.Clear();
-        _currentMode = FeatureMode.HardPixelColorPick;
-        UpdateReport("HardPixel: select a color from the palette first.");
     }
     public void OnClickFeaturePigButton(int index)
     {
@@ -397,188 +381,6 @@ public class LevelEditor : MonoBehaviour
 
     public void EnableColor() { }
 
-    // ─── HARDPIXEL HELPERS ───────────────────────────────────────────────────
-
-    // Toggle cell selection in HardPixelCellPick mode; tints selected cells yellow.
-    // cellImage is passed directly from PaintCell to avoid any index-based child lookup.
-    private void ToggleHardPixelCell(int x, int y, Image cellImage)
-    {
-        if (_tempGrid == null) return;
-        int idx = _hardPixelSelectedCells.FindIndex(c => c.x == x && c.y == y);
-        if (idx >= 0)
-        {
-            _hardPixelSelectedCells.RemoveAt(idx);
-            if (cellImage != null) RestoreGridCellColor(x, y, cellImage);
-        }
-        else
-        {
-            _hardPixelSelectedCells.Add((x, y));
-            if (cellImage != null) cellImage.color = Color.Lerp(cellImage.color, Color.yellow, 0.55f);
-        }
-        UpdateReport($"HardPixel: {_hardPixelSelectedCells.Count} cell(s) selected — click EndHardPixel to commit.");
-    }
-
-    // Validate selection, create CellData, hide source cells, spawn overlay.
-    private void CommitHardPixelGroup()
-    {
-        if (_currentMode != FeatureMode.HardPixelCellPick)
-        {
-            UpdateReport("HardPixel: not in cell-selection mode.");
-            return;
-        }
-        if (_hardPixelSelectedCells.Count < 2)
-        {
-            UpdateReport("HardPixel: select at least 2 cells first.");
-            return;
-        }
-
-        int minX = _hardPixelSelectedCells.Min(c => c.x);
-        int maxX = _hardPixelSelectedCells.Max(c => c.x);
-        int minY = _hardPixelSelectedCells.Min(c => c.y);
-        int maxY = _hardPixelSelectedCells.Max(c => c.y);
-        int sizeX = maxX - minX + 1;
-        int sizeY = maxY - minY + 1;
-
-        if (_hardPixelSelectedCells.Count != sizeX * sizeY)
-        {
-            UpdateReport("HardPixel: selected cells must form a perfect rectangle!");
-            return;
-        }
-
-        var entry = new GridCell.CellData
-        {
-            xPos = minX,
-            yPos = minY,
-            sizeX = sizeX,
-            sizeY = sizeY,
-            colorName = _hardPixelColor,
-            bulletCount = Mathf.Max(2, _hardPixelSelectedCells.Count)
-        };
-
-        _hardPixelEntries.Add(entry);
-        _hardPixelSelectedCells.Clear();
-        _currentMode = FeatureMode.HardPixelActive;
-
-        // Rebuild grid to hide source cells and add overlay
-        GenerateGridUI();
-        ActionShuffleAndSimulate();
-        UpdateReport($"HardPixel committed: {sizeX}×{sizeY} at ({minX},{minY}), bullets={entry.bulletCount}. Click cell to increment bullet count.");
-    }
-
-    // Spawn absolutely-positioned overlay GameObjects for each committed HardPixel entry.
-    private void SpawnHardPixelOverlay(GridLayoutGroup layout)
-    {
-        if (_hardPixelEntries.Count == 0) return;
-
-        const int uiRows = 35;
-        const float spacing = 1f;
-
-        float cellW = layout.cellSize.x;
-        float cellH = layout.cellSize.y;
-        int padLeft = layout.padding.left;
-        int padTop = layout.padding.top;
-
-        foreach (var entry in _hardPixelEntries)
-        {
-            GameObject overlayGO = Instantiate(cellPrefab, gridCellContainer);
-
-            // Disable GridCell to prevent NullRef (Setup() was never called on overlays)
-            GridCell gcComp = overlayGO.GetComponent<GridCell>();
-            if (gcComp != null) gcComp.enabled = false;
-
-            // Exclude from GridLayoutGroup layout
-            LayoutElement le = overlayGO.GetComponent<LayoutElement>();
-            if (le == null) le = overlayGO.AddComponent<LayoutElement>();
-            le.ignoreLayout = true;
-
-            // Compute position: top-left of bounding box in UI coords (top-left origin)
-            int row_ui_top = entry.yPos;
-            float posX = padLeft + entry.xPos * (cellW + spacing);
-            float posY = padTop + row_ui_top * (cellH + spacing);
-            float width = entry.sizeX * cellW + (entry.sizeX - 1) * spacing;
-            float height = entry.sizeY * cellH + (entry.sizeY - 1) * spacing;
-
-            RectTransform rt = overlayGO.GetComponent<RectTransform>();
-            rt.anchorMin = new Vector2(0, 1);
-            rt.anchorMax = new Vector2(0, 1);
-            rt.pivot = new Vector2(0, 1);
-            rt.anchoredPosition = new Vector2(posX, -posY);
-            rt.sizeDelta = new Vector2(width, height);
-
-            Image img = overlayGO.GetComponent<Image>();
-            if (img != null)
-            {
-                img.color = Helper.GetColorFromName(entry.colorName);
-                img.raycastTarget = true;
-            }
-
-            // Add a dedicated TextMeshProUGUI to overlay (avoids relying on prefab child index)
-            GameObject textGO = new GameObject("BulletCountText", typeof(RectTransform));
-            textGO.transform.SetParent(overlayGO.transform, false);
-            RectTransform textRT = textGO.GetComponent<RectTransform>();
-            textRT.anchorMin = Vector2.zero;
-            textRT.anchorMax = Vector2.one;
-            textRT.offsetMin = Vector2.zero;
-            textRT.offsetMax = Vector2.zero;
-            TMPro.TextMeshProUGUI overlayText = textGO.AddComponent<TMPro.TextMeshProUGUI>();
-            overlayText.text = entry.bulletCount.ToString();
-            overlayText.alignment = TMPro.TextAlignmentOptions.Center;
-            overlayText.fontSize = Mathf.Clamp(Mathf.Min(width, height) * 0.4f, 8f, 36f);
-            overlayText.color = Color.white;
-            overlayText.raycastTarget = false;
-
-            // Click → increment bullet count while in HardPixelActive mode
-            Button btn = overlayGO.GetComponent<Button>();
-            if (btn == null) btn = overlayGO.AddComponent<Button>();
-            btn.onClick.RemoveAllListeners();
-            var capturedEntry = entry;
-            var capturedText = overlayText;
-            btn.onClick.AddListener(() =>
-            {
-                if (_currentMode == FeatureMode.HardPixelActive)
-                {
-                    capturedEntry.bulletCount++;
-                    capturedText.text = capturedEntry.bulletCount.ToString();
-                    ActionShuffleAndSimulate();
-                    UpdateReport($"HardPixel bullet count: {capturedEntry.bulletCount} — re-simulated.");
-                }
-            });
-        }
-    }
-
-    // Look up the Image component of the regular grid cell at (x, y) by child index.
-    private Image GetGridCellImage(int x, int y)
-    {
-        const int uiCols = 35;
-        int row_ui = y;
-        int index = row_ui * uiCols + x;
-        if (index < 0 || index >= gridCellContainer.childCount) return null;
-        return gridCellContainer.GetChild(index).GetComponent<Image>();
-    }
-
-    // Restore a regular grid cell's color from _tempGrid (used when deselecting in HardPixel mode).
-    private void RestoreGridCellColor(int x, int y, Image img)
-    {
-        if (_tempGrid == null) return;
-        string colorName = _tempGrid[x, y];
-        GridCell cell = img.GetComponent<GridCell>();
-        if (colorName == "scan_empty")
-        {
-            if (emptySprite != null) img.sprite = emptySprite;
-            img.color = Color.white;
-        }
-        else if (colorName == "empty")
-        {
-            img.sprite = null;
-            img.color = new Color(0, 0, 0, 0.4f);
-        }
-        else
-        {
-            if (cell != null && cell.defaultSprite != null) img.sprite = cell.defaultSprite;
-            img.color = Helper.GetColorFromName(colorName);
-        }
-    }
-
 
     public void OnClickOpenImage()
     {
@@ -661,8 +463,6 @@ public class LevelEditor : MonoBehaviour
             }
         }
 
-        _hardPixelEntries.Clear();
-        _hardPixelSelectedCells.Clear();
         _currentMode = FeatureMode.Paint;
 
         ComputeFinalGrid();
@@ -867,16 +667,7 @@ public class LevelEditor : MonoBehaviour
                     // Tất cả cell đều có thể vẽ để mở rộng vùng final grid
                     cellImage.raycastTarget = _tempGrid != null;
 
-                    // Ẩn cells nằm trong vùng HardPixel đã commit
-                    bool coveredByHardPixel = _hardPixelEntries.Any(e =>
-                        x >= e.xPos && x < e.xPos + e.sizeX &&
-                        y >= e.yPos && y < e.yPos + e.sizeY);
-                    if (coveredByHardPixel)
-                    {
-                        cellImage.color = new Color(0, 0, 0, 0);
-                        cellImage.raycastTarget = false;
-                    }
-                    else if (colorName == "scan_empty")
+                    if (colorName == "scan_empty")
                     {
                         if (emptySprite != null) cellImage.sprite = emptySprite;
                         cellImage.color = Color.white;
@@ -894,23 +685,11 @@ public class LevelEditor : MonoBehaviour
                 }
             }
         }
-
-        // Spawn overlay cells for committed HardPixel entries
-        SpawnHardPixelOverlay(layout);
     }
 
     // --- 3. TÔ MÀU & SIMULATION ---
     public void SetActiveBrush(string colorName)
     {
-        // HardPixel: first step is picking a color
-        if (_currentMode == FeatureMode.HardPixelColorPick)
-        {
-            _hardPixelColor = colorName;
-            _currentMode = FeatureMode.HardPixelCellPick;
-            UpdateReport($"HardPixel: color=[{colorName}] — click cells to select them, EndHardPixel to commit.");
-            return;
-        }
-
         _activeColorBrush = colorName;
         if (_currentMode == FeatureMode.Paint)
             UpdateReport($"[Paint] Active brush with color [{colorName}]");
@@ -942,18 +721,12 @@ public class LevelEditor : MonoBehaviour
             return;
         }
 
-        if (_currentMode == FeatureMode.HardPixelCellPick)
-        {
-            ToggleHardPixelCell(x, y, cellImage);
-            return;
-        }
-
         if (_currentMode != FeatureMode.Paint) return;
         if (_tempGrid[x, y] == _activeColorBrush) return;
         RecordUndo();
         if (_activeColorBrush == "empty" || _activeColorBrush == "scan_empty")
         {
-            _tempGrid[x, y] = "scan_empty";
+            _tempGrid[x, y] = "empty";
             if (emptySprite != null) cellImage.sprite = emptySprite;
             cellImage.color = Color.white;
         }
@@ -962,18 +735,15 @@ public class LevelEditor : MonoBehaviour
             _tempGrid[x, y] = _activeColorBrush;
             GridCell cell = cellImage.GetComponent<GridCell>();
             if (cell != null && cell.defaultSprite != null) cellImage.sprite = cell.defaultSprite;
+            else if (cellImage.sprite == emptySprite) cellImage.sprite = null;
             cellImage.color = Helper.GetColorFromName(_activeColorBrush);
         }
         ComputeFinalGrid();
         ActionShuffleAndSimulate();
     }
 
-    // Drag-paint: same as PaintCell but skips HardPixel toggle (only click should toggle).
     public void PaintCellDrag(int x, int y, Image cellImage)
     {
-        if (_currentMode == FeatureMode.HardPixelCellPick ||
-            _currentMode == FeatureMode.HardPixelColorPick ||
-            _currentMode == FeatureMode.HardPixelActive) return;
         PaintCell(x, y, cellImage);
     }
 
@@ -1012,28 +782,6 @@ public class LevelEditor : MonoBehaviour
                     if (!_finalColorCounts.ContainsKey(c)) _finalColorCounts[c] = 0;
                     _finalColorCounts[c]++;
                 }
-            }
-        }
-        // HardPixel: remove underlying cells' original color contributions, add HardPixel color with bulletCount
-        if (_tempGrid != null)
-        {
-            foreach (var hp in _hardPixelEntries)
-            {
-                // Subtract each covered cell's original color from the count
-                for (int hy = hp.yPos; hy < hp.yPos + hp.sizeY; hy++)
-                    for (int hx = hp.xPos; hx < hp.xPos + hp.sizeX; hx++)
-                    {
-                        string orig = _tempGrid[hx, hy];
-                        if (!string.IsNullOrEmpty(orig) && orig != "empty" && orig != "scan_empty"
-                            && _finalColorCounts.ContainsKey(orig))
-                        {
-                            _finalColorCounts[orig]--;
-                            if (_finalColorCounts[orig] <= 0) _finalColorCounts.Remove(orig);
-                        }
-                    }
-                // Add the HardPixel color with its bulletCount
-                if (!_finalColorCounts.ContainsKey(hp.colorName)) _finalColorCounts[hp.colorName] = 0;
-                _finalColorCounts[hp.colorName] += hp.bulletCount;
             }
         }
         _lastPigResult = RunAdaptiveSimulation();
@@ -1080,15 +828,23 @@ public class LevelEditor : MonoBehaviour
         if (containerRect == null) return;
 
         float containerW = containerRect.rect.width;
-        float containerH = containerRect.rect.height;
         float colSpacing = 4f;
         float rowSpacing = 2f;
 
         float colWidth = Mathf.Max(1f, (containerW - colSpacing * (_queueColumns - 1)) / _queueColumns);
         int maxRows = _multiColumnPigs.Max(c => c.Count);
-        float pigHeight = maxRows > 0
-            ? Mathf.Max(20f, (containerH - rowSpacing * (maxRows - 1)) / maxRows)
-            : containerH;
+        RectTransform pigPrefabRect = pigPrefab.GetComponent<RectTransform>();
+        float pigHeight = (pigPrefabRect != null && pigPrefabRect.rect.height > 0f)
+            ? pigPrefabRect.rect.height
+            : 48f;
+        pigHeight = Mathf.Max(20f, pigHeight);
+
+        int totalRowsPerColumn = maxRows + 1; // +1 for ghost pig
+        float requiredContentHeight = totalRowsPerColumn > 0
+            ? totalRowsPerColumn * pigHeight + (totalRowsPerColumn - 1) * rowSpacing
+            : pigHeight;
+        float finalContentHeight = Mathf.Max(containerRect.rect.height, requiredContentHeight);
+        containerRect.sizeDelta = new Vector2(containerRect.sizeDelta.x, finalContentHeight);
 
         HorizontalLayoutGroup hLayout = pigContainer.GetComponent<HorizontalLayoutGroup>();
         if (hLayout == null) hLayout = pigContainer.gameObject.AddComponent<HorizontalLayoutGroup>();
@@ -1105,7 +861,7 @@ public class LevelEditor : MonoBehaviour
             colGO.transform.SetParent(pigContainer, false);
 
             RectTransform colRect = colGO.GetComponent<RectTransform>();
-            colRect.sizeDelta = new Vector2(colWidth, containerH);
+            colRect.sizeDelta = new Vector2(colWidth, finalContentHeight);
 
             VerticalLayoutGroup vLayout = colGO.AddComponent<VerticalLayoutGroup>();
             vLayout.spacing = rowSpacing;
@@ -1431,8 +1187,7 @@ public class LevelEditor : MonoBehaviour
     {
         if (_multiColumnPigs == null) return;
 
-        var hpSim = BuildHpSimStates();
-        int newSteps = RunSimulationWithLinks(_multiColumnPigs, PrepareSimGrid(hpSim), hpSim);
+        int newSteps = RunSimulationWithLinks(_multiColumnPigs, (string[,])_finalGridMap.Clone());
 
         // Rebuild flat deck for export compatibility
         List<string> flatColors = new List<string>();
@@ -1468,10 +1223,6 @@ public class LevelEditor : MonoBehaviour
         _finalOffsetY = 0;
         _finalColorCounts.Clear();
 
-        _hardPixelEntries.Clear();
-        _hardPixelSelectedCells.Clear();
-        _hardPixelColor = null;
-
         _multiColumnPigs = new List<PigLayoutData>[_queueColumns];
         for (int i = 0; i < _queueColumns; i++) _multiColumnPigs[i] = new List<PigLayoutData>();
 
@@ -1506,17 +1257,6 @@ public class LevelEditor : MonoBehaviour
             for (int y = 0; y < _finalHeight; y++)
                 for (int x = 0; x < _finalWidth; x++)
                     data.gridData.Add(_finalGridMap[x, y]);
-
-            foreach (var hp in _hardPixelEntries)
-                data.hardPixels.Add(new HardPixelData
-                {
-                    xPos = hp.xPos - _finalOffsetX,
-                    yPos = hp.yPos - _finalOffsetY,
-                    sizeX = hp.sizeX,
-                    sizeY = hp.sizeY,
-                    colorName = hp.colorName,
-                    bulletCount = hp.bulletCount
-                });
 
             if (_multiColumnPigs != null)
                 foreach (var col in _multiColumnPigs) data.lanes.Add(new LaneConfig { pigs = new List<PigLayoutData>(col) });
@@ -1582,8 +1322,7 @@ public class LevelEditor : MonoBehaviour
         var deck = poolNames.OrderBy(x => Random.value).ToList();
         var tempB = pool.GroupBy(p => p.color).ToDictionary(g => g.Key, g => g.Select(p => p.bullets).OrderByDescending(b => b).ToList());
         List<int> bullets = deck.Select(c => { int b = tempB[c][0]; tempB[c].RemoveAt(0); return b; }).ToList();
-        var hpStates = BuildHpSimStates();
-        return (deck, RunFullSimulationEnhanced(deck, bullets, PrepareSimGrid(hpStates), hpStates));
+        return (deck, RunFullSimulationEnhanced(deck, bullets, (string[,])_finalGridMap.Clone()));
     }
 
     private void MergeTwoPigs(List<PigDataPool> pool)
@@ -1598,8 +1337,7 @@ public class LevelEditor : MonoBehaviour
     {
         if (_multiColumnPigs == null || _finalGridMap == null) { SpawnPigUI(); return; }
 
-        var hpSim = BuildHpSimStates();
-        int currentSteps = RunSimulationWithLinks(_multiColumnPigs, PrepareSimGrid(hpSim), hpSim);
+        int currentSteps = RunSimulationWithLinks(_multiColumnPigs, (string[,])_finalGridMap.Clone());
         int maxIter = 40;
 
         while (currentSteps != _targetStepsInput && maxIter-- > 0)
@@ -1645,8 +1383,7 @@ public class LevelEditor : MonoBehaviour
                     }
                 if (!merged) break;
             }
-            hpSim = BuildHpSimStates();
-            currentSteps = RunSimulationWithLinks(_multiColumnPigs, PrepareSimGrid(hpSim), hpSim);
+            currentSteps = RunSimulationWithLinks(_multiColumnPigs, (string[,])_finalGridMap.Clone());
         }
 
         // Cập nhật _lastPigResult để export vẫn đúng
@@ -1684,7 +1421,7 @@ public class LevelEditor : MonoBehaviour
 
     // Link-aware simulation: linked group deploys as 1 step when ALL members are at
     // column-front or in queue; group fires combined bullets; group only consumed together.
-    private int RunSimulationWithLinks(List<PigLayoutData>[] lanes, string[,] grid, List<HpSimState> hpStates = null)
+    private int RunSimulationWithLinks(List<PigLayoutData>[] lanes, string[,] grid)
     {
         var cols = new List<(string color, int bullets, int linkId)>[_queueColumns];
         for (int i = 0; i < _queueColumns; i++)
@@ -1706,14 +1443,14 @@ public class LevelEditor : MonoBehaviour
             for (int i = 0; i < queue.Count && !moved; i++)
             {
                 if (queue[i].linkId < 0 && IsExposed(queue[i].color, grid))
-                { steps++; ClearGridSim(queue[i].color, queue[i].bullets, grid, hpStates); queue.RemoveAt(i); moved = true; }
+                { steps++; ClearGridSim(queue[i].color, queue[i].bullets, grid); queue.RemoveAt(i); moved = true; }
             }
 
             // 2. Column front: non-linked exposed pig
             for (int i = 0; i < _queueColumns && !moved; i++)
             {
                 if (cols[i].Count > 0 && cols[i][0].linkId < 0 && IsExposed(cols[i][0].color, grid))
-                { steps++; ClearGridSim(cols[i][0].color, cols[i][0].bullets, grid, hpStates); cols[i].RemoveAt(0); moved = true; }
+                { steps++; ClearGridSim(cols[i][0].color, cols[i][0].bullets, grid); cols[i].RemoveAt(0); moved = true; }
             }
 
             if (moved) continue;
@@ -1740,7 +1477,7 @@ public class LevelEditor : MonoBehaviour
                 if (!allMembers.Any(p => IsExposed(p.color, grid))) continue;
 
                 steps++;
-                foreach (var mp in allMembers) ClearGridSim(mp.color, mp.bullets, grid, hpStates);
+                foreach (var mp in allMembers) ClearGridSim(mp.color, mp.bullets, grid);
                 foreach (int ci in fromCols) cols[ci].RemoveAt(0);
                 foreach (var qp in fromQ) queue.Remove(qp);
                 moved = true;
@@ -1760,7 +1497,7 @@ public class LevelEditor : MonoBehaviour
         return (cols.Any(c => c.Count > 0) || queue.Count > 0) ? -1 : steps;
     }
 
-    private int RunFullSimulationEnhanced(List<string> playDeck, List<int> pigBullets, string[,] grid, List<HpSimState> hpStates = null)
+    private int RunFullSimulationEnhanced(List<string> playDeck, List<int> pigBullets, string[,] grid)
     {
         int steps = 0; List<string> q1C = new List<string>(); List<int> q1B = new List<int>();
         List<string>[] colsC = new List<string>[_queueColumns]; List<int>[] colsB = new List<int>[_queueColumns];
@@ -1770,9 +1507,9 @@ public class LevelEditor : MonoBehaviour
         while ((colsC.Any(c => c.Count > 0) || q1C.Count > 0) && failsafe++ < 1000)
         {
             bool moved = false;
-            for (int i = 0; i < q1C.Count; i++) if (IsExposed(q1C[i], grid)) { steps++; ClearGridSim(q1C[i], q1B[i], grid, hpStates); q1C.RemoveAt(i); q1B.RemoveAt(i); moved = true; break; }
+            for (int i = 0; i < q1C.Count; i++) if (IsExposed(q1C[i], grid)) { steps++; ClearGridSim(q1C[i], q1B[i], grid); q1C.RemoveAt(i); q1B.RemoveAt(i); moved = true; break; }
             if (moved) continue;
-            for (int i = 0; i < _queueColumns; i++) if (colsC[i].Count > 0 && IsExposed(colsC[i][0], grid)) { steps++; ClearGridSim(colsC[i][0], colsB[i][0], grid, hpStates); colsC[i].RemoveAt(0); colsB[i].RemoveAt(0); moved = true; break; }
+            for (int i = 0; i < _queueColumns; i++) if (colsC[i].Count > 0 && IsExposed(colsC[i][0], grid)) { steps++; ClearGridSim(colsC[i][0], colsB[i][0], grid); colsC[i].RemoveAt(0); colsB[i].RemoveAt(0); moved = true; break; }
             if (!moved)
             {
                 for (int i = 0; i < _queueColumns; i++) if (colsC[i].Count > 0 && q1C.Count < MaxQueue1) { steps++; q1C.Add(colsC[i][0]); q1B.Add(colsB[i][0]); colsC[i].RemoveAt(0); colsB[i].RemoveAt(0); moved = true; break; }
@@ -1786,79 +1523,18 @@ public class LevelEditor : MonoBehaviour
     {
         for (int i = 0; i < _finalHeight; i++)
         {
-            for (int j = 0; j < _finalWidth; j++) { if (string.IsNullOrEmpty(grid[j, i]) || grid[j, i] == "empty" || grid[j, i] == "scan_empty") continue; if (grid[j, i] == color) return true; break; }
-            for (int j = _finalWidth - 1; j >= 0; j--) { if (string.IsNullOrEmpty(grid[j, i]) || grid[j, i] == "empty" || grid[j, i] == "scan_empty") continue; if (grid[j, i] == color) return true; break; }
+            for (int j = 0; j < _finalWidth; j++) { if (string.IsNullOrEmpty(grid[j, i]) || grid[j, i] == "empty") continue; if (grid[j, i] == color) return true; break; }
+            for (int j = _finalWidth - 1; j >= 0; j--) { if (string.IsNullOrEmpty(grid[j, i]) || grid[j, i] == "empty") continue; if (grid[j, i] == color) return true; break; }
         }
         return false;
     }
 
-    private void ClearGridSim(string color, int amount, string[,] grid, List<HpSimState> hpStates = null)
+    private void ClearGridSim(string color, int amount, string[,] grid)
     {
-        if (hpStates != null)
-        {
-            foreach (var hp in hpStates)
-            {
-                if (hp.colorName != color || hp.cleared) continue;
-                bool present = false;
-                for (int hy = hp.y0; hy < hp.y0 + hp.sizeY && !present; hy++)
-                    for (int hx = hp.x0; hx < hp.x0 + hp.sizeX && !present; hx++)
-                        if (hx >= 0 && hx < _finalWidth && hy >= 0 && hy < _finalHeight && grid[hx, hy] == color)
-                            present = true;
-                if (!present) continue;
-                hp.health -= amount;
-                if (hp.health <= 0)
-                {
-                    hp.cleared = true;
-                    for (int hy = hp.y0; hy < hp.y0 + hp.sizeY; hy++)
-                        for (int hx = hp.x0; hx < hp.x0 + hp.sizeX; hx++)
-                            if (hx >= 0 && hx < _finalWidth && hy >= 0 && hy < _finalHeight)
-                                grid[hx, hy] = "empty";
-                }
-                return; // one pig fires at one HP block per shot
-            }
-        }
         int cleared = 0;
         for (int i = 0; i < _finalHeight && cleared < amount; i++)
             for (int j = 0; j < _finalWidth && cleared < amount; j++)
                 if (grid[j, i] == color) { grid[j, i] = "empty"; cleared++; }
-    }
-
-    // ─── HARDPIXEL SIMULATION HELPERS ──────────────────────────────────────────
-    private class HpSimState
-    {
-        public string colorName;
-        public int x0, y0, sizeX, sizeY; // in _finalGridMap coordinates
-        public int health;
-        public bool cleared;
-    }
-
-    private List<HpSimState> BuildHpSimStates()
-    {
-        var list = new List<HpSimState>();
-        foreach (var hp in _hardPixelEntries)
-            list.Add(new HpSimState
-            {
-                colorName = hp.colorName,
-                x0 = hp.xPos - _finalOffsetX,
-                y0 = hp.yPos - _finalOffsetY,
-                sizeX = hp.sizeX,
-                sizeY = hp.sizeY,
-                health = hp.bulletCount
-            });
-        return list;
-    }
-
-    // Returns a cloned finalGridMap with HP-covered cells tagged with their HP colorName.
-    private string[,] PrepareSimGrid(List<HpSimState> hpStates)
-    {
-        var grid = (string[,])_finalGridMap.Clone();
-        if (hpStates == null) return grid;
-        foreach (var hp in hpStates)
-            for (int hy = hp.y0; hy < hp.y0 + hp.sizeY; hy++)
-                for (int hx = hp.x0; hx < hp.x0 + hp.sizeX; hx++)
-                    if (hx >= 0 && hx < _finalWidth && hy >= 0 && hy < _finalHeight)
-                        grid[hx, hy] = hp.colorName;
-        return grid;
     }
 
 
@@ -1866,11 +1542,6 @@ public class LevelEditor : MonoBehaviour
     private void RecordUndo()
     {
         if (_tempGrid == null) return;
-
-        // Deep-copy hardPixelEntries
-        var hpCopy = new List<GridCell.CellData>();
-        foreach (var hp in _hardPixelEntries)
-            hpCopy.Add(new GridCell.CellData { xPos = hp.xPos, yPos = hp.yPos, sizeX = hp.sizeX, sizeY = hp.sizeY, colorName = hp.colorName, bulletCount = hp.bulletCount });
 
         // Deep-copy pig columns
         List<PigLayoutData>[] pigCopy = null;
@@ -1894,7 +1565,6 @@ public class LevelEditor : MonoBehaviour
         _undoSnapshots.Add(new UndoSnapshot
         {
             tempGrid        = (string[,])_tempGrid.Clone(),
-            hardPixelEntries = hpCopy,
             multiColumnPigs = pigCopy,
             queueColumns    = _queueColumns
         });
@@ -1912,8 +1582,6 @@ public class LevelEditor : MonoBehaviour
         _undoSnapshots.RemoveAt(_undoSnapshots.Count - 1);
 
         _tempGrid = snap.tempGrid;
-        _hardPixelEntries = snap.hardPixelEntries;
-        _hardPixelSelectedCells.Clear();
 
         if (snap.multiColumnPigs != null)
         {
@@ -1930,6 +1598,29 @@ public class LevelEditor : MonoBehaviour
         GenerateGridUI();
         ActionShuffleAndSimulate();
         UpdateReport($"Undo — {_undoSnapshots.Count} step(s) remaining.");
+    }
+
+    private void Update()
+    {
+        bool ctrlHeld = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+        if (!ctrlHeld || !Input.GetKeyDown(KeyCode.Z)) return;
+
+        if (IsAnyEditorInputFocused()) return;
+        PerformUndo();
+    }
+
+    private bool IsAnyEditorInputFocused()
+    {
+        if (levelInput != null && levelInput.isFocused) return true;
+        if (widthInput != null && widthInput.isFocused) return true;
+        if (stepsInput != null && stepsInput.isFocused) return true;
+        if (columnsInput != null && columnsInput.isFocused) return true;
+
+        if (EventSystem.current == null) return false;
+        var currentSelected = EventSystem.current.currentSelectedGameObject;
+        if (currentSelected == null) return false;
+
+        return currentSelected.GetComponent<TMP_InputField>() != null;
     }
 
     private void UpdateReport(string msg) { if (reportTextDisplay != null) reportTextDisplay.text = msg; }

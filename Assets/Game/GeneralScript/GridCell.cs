@@ -1,8 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
-using TMPro;
-using System.Numerics;
 
 public class GridCell : MonoBehaviour, IPointerDownHandler, IPointerEnterHandler
 {
@@ -11,22 +9,6 @@ public class GridCell : MonoBehaviour, IPointerDownHandler, IPointerEnterHandler
     private LevelEditor _manager;
     private Image _myImage;
     public Sprite defaultSprite { get; private set; }
-    string colorDefault = "white";
-    // public TextMeshProUGUI count;
-
-    public class CellData
-    {
-        public int xPos;
-        public int yPos;
-
-        public int sizeX;
-
-        public int sizeY;
-        
-        public string colorName;
-        public int bulletCount;
-    }
-    public CellData cellData = null;
 
     public void Setup(int x, int y, LevelEditor manager, int bulletCount)
     {
@@ -35,12 +17,6 @@ public class GridCell : MonoBehaviour, IPointerDownHandler, IPointerEnterHandler
         _manager = manager;
         _myImage = GetComponent<Image>();
         if (_myImage != null) defaultSprite = _myImage.sprite;
-
-        // if (bulletCount > 0) {
-        //     count.text = bulletCount.ToString();
-        // } else {
-        //     count.text = "";
-        // }
     }
     
     // Khi nhấn chuột xuống ô này

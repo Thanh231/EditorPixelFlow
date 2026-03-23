@@ -8,19 +8,7 @@ public class LevelData
     public int height;
     public int targetDifficulty;
     public List<string> gridData = new List<string>();
-    public List<HardPixelData> hardPixels = new List<HardPixelData>();
     public List<LaneConfig> lanes = new List<LaneConfig>();
-}
-
-[System.Serializable]
-public class HardPixelData
-{
-    public int xPos;
-    public int yPos;
-    public int sizeX;
-    public int sizeY;
-    public string colorName;
-    public int bulletCount;
 }
 
 [System.Serializable]

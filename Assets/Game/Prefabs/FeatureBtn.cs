@@ -36,7 +36,7 @@ public class FeatureBtn : MonoBehaviour, IPointerDownHandler
     public void OnPointerDown(PointerEventData eventData)
     {
 
-        int featureIndex = System.Array.IndexOf(levelEditor.test1, featureName);
+        int featureIndex = System.Array.IndexOf(levelEditor.features, featureName);
         if (featureIndex >= 0)
             levelEditor.OnClickFeatureButton(featureIndex);
 
