@@ -54,6 +54,7 @@ public class LevelEditor : MonoBehaviour
     public Transform colorContainer; // Đối tượng Content của ScrollView
     public Transform pigContainer; // Đối tượng Content của ScrollView
     public Transform pigFeatureContainer;
+    public TMP_InputField levelInput;
     public TMP_InputField widthInput;
     public TMP_InputField stepsInput;
     public TMP_InputField columnsInput;
@@ -80,8 +81,17 @@ public class LevelEditor : MonoBehaviour
     private int _selectedPigCol = -1;
     private int _selectedPigRow = -1;
     private int _pigsBeforeAdjust = 0;
-
+    private int levelIndex = 1;
     private int MaxUndoSteps = 10;
+
+    private struct UndoSnapshot
+    {
+        public string[,] tempGrid;
+        public List<GridCell.CellData> hardPixelEntries;
+        public List<PigLayoutData>[] multiColumnPigs;
+        public int queueColumns;
+    }
+    private List<UndoSnapshot> _undoSnapshots = new List<UndoSnapshot>();
 
     // --- Feature state ---
     public enum FeatureMode { None, Paint, RecolorPicking, RecolorWaitBrush, HardPixelColorPick, HardPixelCellPick, HardPixelActive }
@@ -100,6 +110,11 @@ public class LevelEditor : MonoBehaviour
 
     private void Start()
     {
+        if (levelInput  != null && string.IsNullOrEmpty(levelInput.text))  levelInput.text  = levelIndex.ToString();
+        if (widthInput  != null && string.IsNullOrEmpty(widthInput.text))  widthInput.text  = _targetWidth.ToString();
+        if (stepsInput  != null && string.IsNullOrEmpty(stepsInput.text))  stepsInput.text  = _targetStepsInput.ToString();
+        if (columnsInput != null && string.IsNullOrEmpty(columnsInput.text)) columnsInput.text = _queueColumns.ToString();
+
         GenerateColorUI();
         GenerateFeatureUI();
         GeneratePigFeatureUI();
@@ -171,34 +186,32 @@ public class LevelEditor : MonoBehaviour
         RectTransform containerRect = colorContainer as RectTransform;
         if (containerRect == null) return;
 
-        const float spacing = 2f;
+        const float baseSize = 60f;   // kích thước ô vuông (gấp đôi 30f)
+        const float spacing  = 8f;    // khoảng cách đều nhau giữa các ô
         var colorKeys = new List<string>(Helper.ColorMap.Keys);
         int count = colorKeys.Count;
 
-        RectTransform colorPrefabRect = colorPrefab.GetComponent<RectTransform>();
-        float prefabW = (colorPrefabRect != null && colorPrefabRect.rect.width > 0f) ? colorPrefabRect.rect.width : 30f;
-        float prefabH = (colorPrefabRect != null && colorPrefabRect.rect.height > 0f) ? colorPrefabRect.rect.height : 30f;
-
         float containerW = containerRect.rect.width;
-        float containerH = containerRect.rect.height;
 
-        // Tính số cột dựa trên kích thước gốc của prefab
-        int cols = Mathf.Max(1, Mathf.FloorToInt((containerW + spacing) / (prefabW + spacing)));
+        // Số cột vừa khít chiều ngang container
+        int cols = Mathf.Max(1, Mathf.FloorToInt((containerW + spacing) / (baseSize + spacing)));
+        // cellSize tính lại để lấp đầy đúng chiều ngang (không có khoảng trắng thừa)
+        float cellSize = Mathf.Max(1f, (containerW - spacing * (cols - 1)) / cols);
+
+        // Tính tổng chiều cao content để ContentSizeFitter scroll đúng
         int rows = Mathf.CeilToInt((float)count / cols);
-
-        // cellW và cellH tính độc lập để lấp đầy cả chiều ngang lẫn chiều dọc container
-        float cellW = Mathf.Max(1f, (containerW - spacing * (cols - 1)) / cols);
-        float cellH = Mathf.Max(1f, (containerH - spacing * (rows - 1)) / rows);
+        float totalH = rows * cellSize + (rows - 1) * spacing;
+        containerRect.sizeDelta = new Vector2(containerRect.sizeDelta.x, totalH);
 
         GridLayoutGroup layout = colorContainer.GetComponent<GridLayoutGroup>();
         if (layout == null) layout = colorContainer.gameObject.AddComponent<GridLayoutGroup>();
-        layout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-        layout.constraintCount = cols;
-        layout.startCorner = GridLayoutGroup.Corner.UpperLeft;
-        layout.startAxis = GridLayoutGroup.Axis.Horizontal;
-        layout.childAlignment = TextAnchor.UpperLeft;
-        layout.spacing = new Vector2(spacing, spacing);
-        layout.cellSize = new Vector2(cellW, cellH);
+        layout.constraint       = GridLayoutGroup.Constraint.FixedColumnCount;
+        layout.constraintCount  = cols;
+        layout.startCorner      = GridLayoutGroup.Corner.UpperLeft;
+        layout.startAxis        = GridLayoutGroup.Axis.Horizontal;
+        layout.childAlignment   = TextAnchor.UpperLeft;
+        layout.spacing          = new Vector2(spacing, spacing);
+        layout.cellSize         = new Vector2(cellSize, cellSize);
 
         for (int i = 0; i < count; i++)
         {
@@ -434,11 +447,11 @@ public class LevelEditor : MonoBehaviour
 
         var entry = new GridCell.CellData
         {
-            xPos       = minX,
-            yPos       = minY,
-            sizeX      = sizeX,
-            sizeY      = sizeY,
-            colorName  = _hardPixelColor,
+            xPos = minX,
+            yPos = minY,
+            sizeX = sizeX,
+            sizeY = sizeY,
+            colorName = _hardPixelColor,
             bulletCount = Mathf.Max(2, _hardPixelSelectedCells.Count)
         };
 
@@ -463,7 +476,7 @@ public class LevelEditor : MonoBehaviour
         float cellW = layout.cellSize.x;
         float cellH = layout.cellSize.y;
         int padLeft = layout.padding.left;
-        int padTop  = layout.padding.top;
+        int padTop = layout.padding.top;
 
         foreach (var entry in _hardPixelEntries)
         {
@@ -480,22 +493,22 @@ public class LevelEditor : MonoBehaviour
 
             // Compute position: top-left of bounding box in UI coords (top-left origin)
             int row_ui_top = entry.yPos;
-            float posX  = padLeft + entry.xPos * (cellW + spacing);
-            float posY  = padTop  + row_ui_top  * (cellH + spacing);
-            float width  = entry.sizeX * cellW + (entry.sizeX - 1) * spacing;
+            float posX = padLeft + entry.xPos * (cellW + spacing);
+            float posY = padTop + row_ui_top * (cellH + spacing);
+            float width = entry.sizeX * cellW + (entry.sizeX - 1) * spacing;
             float height = entry.sizeY * cellH + (entry.sizeY - 1) * spacing;
 
             RectTransform rt = overlayGO.GetComponent<RectTransform>();
-            rt.anchorMin        = new Vector2(0, 1);
-            rt.anchorMax        = new Vector2(0, 1);
-            rt.pivot            = new Vector2(0, 1);
+            rt.anchorMin = new Vector2(0, 1);
+            rt.anchorMax = new Vector2(0, 1);
+            rt.pivot = new Vector2(0, 1);
             rt.anchoredPosition = new Vector2(posX, -posY);
-            rt.sizeDelta        = new Vector2(width, height);
+            rt.sizeDelta = new Vector2(width, height);
 
             Image img = overlayGO.GetComponent<Image>();
             if (img != null)
             {
-                img.color         = Helper.GetColorFromName(entry.colorName);
+                img.color = Helper.GetColorFromName(entry.colorName);
                 img.raycastTarget = true;
             }
 
@@ -519,7 +532,7 @@ public class LevelEditor : MonoBehaviour
             if (btn == null) btn = overlayGO.AddComponent<Button>();
             btn.onClick.RemoveAllListeners();
             var capturedEntry = entry;
-            var capturedText  = overlayText;
+            var capturedText = overlayText;
             btn.onClick.AddListener(() =>
             {
                 if (_currentMode == FeatureMode.HardPixelActive)
@@ -538,7 +551,7 @@ public class LevelEditor : MonoBehaviour
     {
         const int uiCols = 35;
         int row_ui = y;
-        int index  = row_ui * uiCols + x;
+        int index = row_ui * uiCols + x;
         if (index < 0 || index >= gridCellContainer.childCount) return null;
         return gridCellContainer.GetChild(index).GetComponent<Image>();
     }
@@ -557,7 +570,7 @@ public class LevelEditor : MonoBehaviour
         else if (colorName == "empty")
         {
             img.sprite = null;
-            img.color  = new Color(0, 0, 0, 0.4f);
+            img.color = new Color(0, 0, 0, 0.4f);
         }
         else
         {
@@ -583,6 +596,112 @@ public class LevelEditor : MonoBehaviour
             null,
             "Select Map Image",
             "Load");
+    }
+
+    public void OnClickOpenJson()
+    {
+        FileBrowser.SetFilters(true, new FileBrowser.Filter("JSON", ".json"));
+        FileBrowser.SetDefaultFilter(".json");
+
+        FileBrowser.ShowLoadDialog((paths) =>
+        {
+            StartCoroutine(LoadJsonRoutine(paths[0]));
+        },
+            null,
+            FileBrowser.PickMode.Files,
+            false,
+            null,
+            "Select Grid JSON",
+            "Load");
+    }
+
+    private IEnumerator LoadJsonRoutine(string path)
+    {
+        string json;
+        try { json = File.ReadAllText(path); }
+        catch (System.Exception e)
+        {
+            UpdateReport($"<color=red>Error reading JSON:</color> {e.Message}");
+            yield break;
+        }
+
+        var rawGrid = ParseJsonGrid(json);
+        if (rawGrid == null || rawGrid.Count == 0)
+        {
+            UpdateReport("<color=red>Error:</color> Invalid or empty JSON grid.");
+            yield break;
+        }
+
+        int jsonH = rawGrid.Count;
+        int jsonW = rawGrid[0].Count;
+
+        if (jsonW > TempGridSize || jsonH > TempGridSize)
+        {
+            UpdateReport($"<color=red>Error:</color> Grid too large ({jsonW}×{jsonH}), max is {TempGridSize}×{TempGridSize}.");
+            yield break;
+        }
+
+        int offsetX = (TempGridSize - jsonW) / 2;
+        int offsetY = (TempGridSize - jsonH) / 2;
+
+        _tempGrid = new string[TempGridSize, TempGridSize];
+        for (int cy = 0; cy < TempGridSize; cy++)
+            for (int cx = 0; cx < TempGridSize; cx++)
+                _tempGrid[cx, cy] = "empty";
+
+        // JSON row 0 = top of image → low y in _tempGrid (rendered at top of UI)
+        for (int row = 0; row < jsonH; row++)
+        {
+            var rowData = rawGrid[row];
+            int count = Mathf.Min(rowData.Count, jsonW);
+            for (int col = 0; col < count; col++)
+            {
+                string colorName = rowData[col].ToLowerInvariant();
+                _tempGrid[col + offsetX, row + offsetY] = colorName;
+            }
+        }
+
+        _hardPixelEntries.Clear();
+        _hardPixelSelectedCells.Clear();
+        _currentMode = FeatureMode.Paint;
+
+        ComputeFinalGrid();
+        GenerateGridUI();
+        ActionShuffleAndSimulate();
+        UpdateReport($"JSON loaded: {jsonW}×{jsonH}  →  Final: {_finalWidth}×{_finalHeight}");
+        yield return null;
+    }
+
+    private List<List<string>> ParseJsonGrid(string json)
+    {
+        var result = new List<List<string>>();
+        int depth = 0;
+        int start = -1;
+        for (int i = 0; i < json.Length; i++)
+        {
+            char c = json[i];
+            if (c == '[')
+            {
+                depth++;
+                if (depth == 2) start = i;
+            }
+            else if (c == ']')
+            {
+                if (depth == 2)
+                    result.Add(ParseJsonStringArray(json.Substring(start, i - start + 1)));
+                depth--;
+            }
+        }
+        return result;
+    }
+
+    private List<string> ParseJsonStringArray(string rowStr)
+    {
+        var items = new List<string>();
+        var matches = System.Text.RegularExpressions.Regex.Matches(rowStr, "\"([^\"]*)\"");
+        foreach (System.Text.RegularExpressions.Match m in matches)
+            items.Add(m.Groups[1].Value);
+        return items;
     }
 
     private IEnumerator LoadImageRoutine(string path)
@@ -618,6 +737,10 @@ public class LevelEditor : MonoBehaviour
         if (columnsInput != null && !string.IsNullOrEmpty(columnsInput.text))
             if (int.TryParse(columnsInput.text, out int col))
                 _queueColumns = Mathf.Clamp(col, 2, 5);
+
+        if (levelInput != null && !string.IsNullOrEmpty(levelInput.text))
+            if (int.TryParse(levelInput.text, out int lvl))
+                levelIndex = Mathf.Max(1, lvl);
 
         int scanW = _targetWidth;
         float aspect = (float)_textureInput.width / _textureInput.height;
@@ -735,7 +858,7 @@ public class LevelEditor : MonoBehaviour
                 GridCell cell = cellGO.GetComponent<GridCell>();
                 if (cell != null)
                 {
-                    if (_tempGrid != null) cell.Setup(x, y, this,0);
+                    if (_tempGrid != null) cell.Setup(x, y, this, 0);
                     else cell.enabled = false;
                 }
 
@@ -789,6 +912,8 @@ public class LevelEditor : MonoBehaviour
         }
 
         _activeColorBrush = colorName;
+        if (_currentMode == FeatureMode.Paint)
+            UpdateReport($"[Paint] Active brush with color [{colorName}]");
         // Nếu đang chờ chọn màu đích cho ReColor → áp dụng ngay
         if (_currentMode == FeatureMode.RecolorWaitBrush && _recolorSourceColor != null)
         {
@@ -1328,6 +1453,45 @@ public class LevelEditor : MonoBehaviour
         UpdateReport(msg);
     }
 
+    // --- CLEAR / RESET ---
+    public void OnClickClear()
+    {
+        _tempGrid = new string[TempGridSize, TempGridSize];
+        for (int cy = 0; cy < TempGridSize; cy++)
+            for (int cx = 0; cx < TempGridSize; cx++)
+                _tempGrid[cx, cy] = "empty";
+
+        _finalGridMap = null;
+        _finalWidth = 0;
+        _finalHeight = 0;
+        _finalOffsetX = 0;
+        _finalOffsetY = 0;
+        _finalColorCounts.Clear();
+
+        _hardPixelEntries.Clear();
+        _hardPixelSelectedCells.Clear();
+        _hardPixelColor = null;
+
+        _multiColumnPigs = new List<PigLayoutData>[_queueColumns];
+        for (int i = 0; i < _queueColumns; i++) _multiColumnPigs[i] = new List<PigLayoutData>();
+
+        _undoHistory.Clear();
+        _undoSnapshots.Clear();
+        _linkingPigs.Clear();
+        _nextLinkId = 0;
+        _selectedPigCol = -1;
+        _selectedPigRow = -1;
+        _lastPigResult = default;
+
+        _currentMode = FeatureMode.Paint;
+        _recolorSourceColor = null;
+        NotifyFeatureSelected(-1);
+
+        GenerateGridUI();
+        SpawnPigUI();
+        UpdateReport("Cleared — ready for new level.");
+    }
+
     // --- 4. EXPORT JSON ---
     public void OnClickSaveJSON()
     {
@@ -1340,14 +1504,26 @@ public class LevelEditor : MonoBehaviour
                 targetDifficulty = _targetStepsInput
             };
             for (int y = 0; y < _finalHeight; y++)
-                for (int x = 0; x < _finalWidth; x++) data.gridData.Add(_finalGridMap[x, y]);
+                for (int x = 0; x < _finalWidth; x++)
+                    data.gridData.Add(_finalGridMap[x, y]);
+
+            foreach (var hp in _hardPixelEntries)
+                data.hardPixels.Add(new HardPixelData
+                {
+                    xPos = hp.xPos - _finalOffsetX,
+                    yPos = hp.yPos - _finalOffsetY,
+                    sizeX = hp.sizeX,
+                    sizeY = hp.sizeY,
+                    colorName = hp.colorName,
+                    bulletCount = hp.bulletCount
+                });
 
             if (_multiColumnPigs != null)
                 foreach (var col in _multiColumnPigs) data.lanes.Add(new LaneConfig { pigs = new List<PigLayoutData>(col) });
 
             File.WriteAllText(paths[0], JsonUtility.ToJson(data, true));
             UpdateReport("Saved Success!");
-        }, null, SimpleFileBrowser.FileBrowser.PickMode.Files, false, null, "Save Level", "Save");
+        }, null, SimpleFileBrowser.FileBrowser.PickMode.Files, false, null, $"Save Level {levelIndex}", "Save");
     }
 
     // --- MATH & HELPERS ---
@@ -1660,10 +1836,11 @@ public class LevelEditor : MonoBehaviour
     {
         var list = new List<HpSimState>();
         foreach (var hp in _hardPixelEntries)
-            list.Add(new HpSimState {
+            list.Add(new HpSimState
+            {
                 colorName = hp.colorName,
-                x0    = hp.xPos - _finalOffsetX,
-                y0    = hp.yPos - _finalOffsetY,
+                x0 = hp.xPos - _finalOffsetX,
+                y0 = hp.yPos - _finalOffsetY,
                 sizeX = hp.sizeX,
                 sizeY = hp.sizeY,
                 health = hp.bulletCount
@@ -1689,17 +1866,70 @@ public class LevelEditor : MonoBehaviour
     private void RecordUndo()
     {
         if (_tempGrid == null) return;
-        _undoHistory.Add((string[,])_tempGrid.Clone());
-        if (_undoHistory.Count > MaxUndoSteps) _undoHistory.RemoveAt(0);
+
+        // Deep-copy hardPixelEntries
+        var hpCopy = new List<GridCell.CellData>();
+        foreach (var hp in _hardPixelEntries)
+            hpCopy.Add(new GridCell.CellData { xPos = hp.xPos, yPos = hp.yPos, sizeX = hp.sizeX, sizeY = hp.sizeY, colorName = hp.colorName, bulletCount = hp.bulletCount });
+
+        // Deep-copy pig columns
+        List<PigLayoutData>[] pigCopy = null;
+        if (_multiColumnPigs != null)
+        {
+            pigCopy = new List<PigLayoutData>[_multiColumnPigs.Length];
+            for (int i = 0; i < _multiColumnPigs.Length; i++)
+            {
+                pigCopy[i] = new List<PigLayoutData>();
+                foreach (var p in _multiColumnPigs[i])
+                    pigCopy[i].Add(new PigLayoutData
+                    {
+                        colorName = p.colorName, bullets = p.bullets, isHidden = p.isHidden,
+                        linkId = p.linkId,
+                        pigLeft  = p.pigLeft  != null ? new PigMarker { LaneIndex = p.pigLeft.LaneIndex,  index = p.pigLeft.index  } : null,
+                        pigRight = p.pigRight != null ? new PigMarker { LaneIndex = p.pigRight.LaneIndex, index = p.pigRight.index } : null
+                    });
+            }
+        }
+
+        _undoSnapshots.Add(new UndoSnapshot
+        {
+            tempGrid        = (string[,])_tempGrid.Clone(),
+            hardPixelEntries = hpCopy,
+            multiColumnPigs = pigCopy,
+            queueColumns    = _queueColumns
+        });
+        if (_undoSnapshots.Count > MaxUndoSteps) _undoSnapshots.RemoveAt(0);
     }
 
     public void PerformUndo()
     {
-        if (_undoHistory.Count == 0) return;
-        _tempGrid = _undoHistory.Last();
-        _undoHistory.RemoveAt(_undoHistory.Count - 1);
+        if (_undoSnapshots.Count == 0)
+        {
+            UpdateReport("Nothing to undo.");
+            return;
+        }
+        var snap = _undoSnapshots[_undoSnapshots.Count - 1];
+        _undoSnapshots.RemoveAt(_undoSnapshots.Count - 1);
+
+        _tempGrid = snap.tempGrid;
+        _hardPixelEntries = snap.hardPixelEntries;
+        _hardPixelSelectedCells.Clear();
+
+        if (snap.multiColumnPigs != null)
+        {
+            _queueColumns = snap.queueColumns;
+            _multiColumnPigs = snap.multiColumnPigs;
+        }
+
+        _currentMode = FeatureMode.Paint;
+        _linkingPigs.Clear();
+        _selectedPigCol = -1;
+        _selectedPigRow = -1;
+
         ComputeFinalGrid();
-        GenerateGridUI(); ActionShuffleAndSimulate();
+        GenerateGridUI();
+        ActionShuffleAndSimulate();
+        UpdateReport($"Undo — {_undoSnapshots.Count} step(s) remaining.");
     }
 
     private void UpdateReport(string msg) { if (reportTextDisplay != null) reportTextDisplay.text = msg; }

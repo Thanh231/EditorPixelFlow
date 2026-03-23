@@ -11,6 +11,7 @@ public class GridCell : MonoBehaviour, IPointerDownHandler, IPointerEnterHandler
     private LevelEditor _manager;
     private Image _myImage;
     public Sprite defaultSprite { get; private set; }
+    string colorDefault = "white";
     // public TextMeshProUGUI count;
 
     public class CellData
